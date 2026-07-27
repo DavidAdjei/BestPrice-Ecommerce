@@ -1,0 +1,372 @@
+// Prisma schema — MySQL
+//
+// This replaces the previous MongoDB/Mongoose models. A few deliberate
+// relational changes from the old document shape:
+//   - Room.users (a raw string array) and Room.unreadCount become a
+//     proper RoomParticipant join table, so "which rooms is this user
+//     in" and "what's their unread count" are indexed queries instead
+//     of array scans.
+//   - Product.imgs (array) becomes ProductImage rows with an explicit
+//     order — array position was implicit before.
+//   - Product.reviews (embedded array) becomes a real Review table
+//     with a foreign key, so a review can be queried/paginated/deleted
+//     independently of loading the whole product.
+//   - Category.filters (a Map of embedded filter documents) becomes
+//     CategoryFilter rows.
+//   - Wishlist/Cart stay as their own join tables with a unique
+//     (userId, productId) constraint, which Mongo wasn't enforcing.
+//
+// Freeform, rarely-queried fields (chat seenBy/deliveredTo lists,
+// order-item specs/images snapshots) stay as Json columns rather than
+// being fully normalized — they're write-once bookkeeping data, not
+// something the app filters or joins on.
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+enum Role {
+  BUYER
+  SELLER
+  ADMIN
+}
+
+enum AccountStatus {
+  ACTIVE
+  SUSPENDED
+  DELETED
+}
+
+enum OrderStatus {
+  PENDING
+  PROCESSING
+  SHIPPED
+  DELIVERED
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+}
+
+enum NotificationStatus {
+  READ
+  UNREAD
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  VIDEO
+  FILE
+  PRODUCT
+}
+
+model User {
+  id                String        @id @default(cuid())
+  firstName         String
+  lastName          String
+  email             String        @unique
+  password          String?
+  role              Role          @default(BUYER)
+  imageUrl          String?
+  imagePublicId     String?
+  online            Boolean       @default(false)
+  lastSeen          DateTime?
+  verified          Boolean       @default(false)
+  phone             String?
+  dateOfBirth       DateTime?
+  accountStatus     AccountStatus @default(ACTIVE)
+  paystackSecret    String?
+  lastLogin         DateTime?
+  registrationStep  Int           @default(1)
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  // Email verification + password reset — both use a random token with
+  // an expiry rather than a reusable secret.
+  verificationToken       String?   @unique
+  verificationTokenExpiry DateTime?
+  resetToken              String?   @unique
+  resetTokenExpiry        DateTime?
+
+  address           Address?
+  paymentMethods    PaymentMethod[]
+  products          Product[]        @relation("SellerProducts")
+  reviews           Review[]
+  ordersAsBuyer     Order[]          @relation("BuyerOrders")
+  ordersAsSeller    Order[]          @relation("SellerOrders")
+  cartItems         CartItem[]
+  wishlistItems     WishlistItem[]
+  notifications     Notification[]
+  roomMemberships   RoomParticipant[]
+  messages          Message[]
+
+  @@index([role])
+}
+
+model Address {
+  id          String  @id @default(cuid())
+  userId      String  @unique
+  user        User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  city        String
+  region      String
+  street      String
+  houseNumber String
+  ghanaPost   String
+}
+
+model PaymentMethod {
+  id            String    @id @default(cuid())
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider      String
+  accountNumber String
+  expiryDate    DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@index([userId])
+}
+
+model Category {
+  id       String           @id @default(cuid())
+  title    String           @unique
+  keywords Json? // string[]
+  filters  CategoryFilter[]
+  products Product[]
+}
+
+model CategoryFilter {
+  id         String   @id @default(cuid())
+  categoryId String
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  filterName String
+  options    Json // string[]
+
+  @@index([categoryId])
+}
+
+model Product {
+  id          String   @id @default(cuid())
+  title       String  @db.VarChar(255)
+  description String?  @db.Text
+  price       Decimal  @db.Decimal(10, 2)
+  inStock     Int      @default(0)
+  Brand       String?
+  ram         String?
+  displaySize Float?
+  eta         Int?
+  rating      Float?   @default(0)
+  popular     Boolean  @default(false)
+  forWhom     String? // was `For`
+  genre       String?
+  language    String?
+  type        String?
+  specs       Json? // string[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Added for imported third-party marketplace data (Amazon/Walmart/
+  // Shein/Shopee/Lazada sample datasets) — all nullable so existing,
+  // hand-entered products are unaffected.
+  currency          String?  @default("GHS")
+  originalPrice     Decimal? @db.Decimal(10, 2) // pre-discount price, for strikethrough pricing
+  sku               String? // asin / upc / product_id / sku from the source marketplace
+  sourceUrl         String?  @db.Text // link back to the original listing
+  sourceMarketplace String? // "Amazon" | "Walmart" | "Shein" | "Shopee" | "Lazada" | null for native listings
+  externalSellerName String? // the original seller's display name, when the seller isn't one of our real Users
+  colors            Json? // string[]
+  sizes             Json? // string[]
+  deliveryInfo      Json? // string[] — freeform delivery/shipping notes from the source
+  categoryPath      Json? // string[] — full category breadcrumb from the source, richest-first
+
+  categoryId  String?
+  category    Category? @relation(fields: [categoryId], references: [id])
+  sellerId    String
+  seller      User      @relation("SellerProducts", fields: [sellerId], references: [id])
+
+  images      ProductImage[]
+  reviews     Review[]
+  cartItems   CartItem[]
+  wishlistedBy WishlistItem[]
+
+  @@index([sellerId])
+  @@index([categoryId])
+  @@index([sourceMarketplace])
+  @@fulltext([title])
+}
+
+model ProductImage {
+  id        String  @id @default(cuid())
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  url       String
+  position  Int     @default(0)
+
+  @@index([productId])
+}
+
+model Review {
+  id           String   @id @default(cuid())
+  productId    String
+  product      Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  reviewerId   String?
+  reviewer     User?    @relation(fields: [reviewerId], references: [id])
+  reviewerName String
+  title        String
+  content      String   @db.Text
+  rating       Int      @default(0)
+  createdAt    DateTime @default(now())
+
+  @@index([productId])
+}
+
+model CartItem {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  quantity  Int      @default(1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, productId])
+}
+
+model WishlistItem {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, productId])
+}
+
+model Order {
+  id              String        @id @default(cuid())
+  buyerId         String
+  buyer           User          @relation("BuyerOrders", fields: [buyerId], references: [id])
+  sellerId        String
+  seller          User          @relation("SellerOrders", fields: [sellerId], references: [id])
+  orderDate       DateTime      @default(now())
+  status          OrderStatus   @default(PENDING)
+  totalPrice      Decimal       @db.Decimal(10, 2)
+  deliveryAddress String        @db.Text
+  payment         PaymentStatus @default(PENDING)
+  paymentReference String?
+  couponCode      String?
+  discountAmount  Decimal?      @db.Decimal(10, 2)
+
+  items OrderItem[]
+
+  @@index([buyerId])
+  @@index([sellerId])
+}
+
+model OrderItem {
+  id             String  @id @default(cuid())
+  orderId        String
+  order          Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  // Nullable, non-relational reference back to the product this line
+  // item snapshots — lets us check "did this buyer actually buy this
+  // product" (e.g. for verified-purchase reviews) without a hard FK, so
+  // a later product deletion never breaks historical orders.
+  productId      String?
+  title          String   @db.VarChar(255)
+  quantity       Int
+  price          Decimal @db.Decimal(10, 2)
+  specifications Json? // snapshot of specs at time of purchase
+  images         Json? // snapshot of image urls at time of purchase
+
+  @@index([orderId])
+  @@index([productId])
+}
+
+model Coupon {
+  id            String    @id @default(cuid())
+  code          String    @unique
+  percentOff    Int? // e.g. 15 for 15% off
+  amountOff     Decimal?  @db.Decimal(10, 2) // flat amount off, in GHS
+  maxRedemptions Int?
+  timesRedeemed Int       @default(0)
+  active        Boolean   @default(true)
+  expiresAt     DateTime?
+  createdAt     DateTime  @default(now())
+}
+
+model ErrorLog {
+  id        String   @id @default(cuid())
+  message   String   @db.Text
+  stack     String?  @db.Text
+  url       String?
+  userId    String?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+model Notification {
+  id        String             @id @default(cuid())
+  userId    String
+  user      User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String
+  content   String             @db.Text
+  status    NotificationStatus @default(UNREAD)
+  createdAt DateTime           @default(now())
+
+  @@index([userId])
+}
+
+model Room {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  participants RoomParticipant[]
+  messages     Message[]
+}
+
+model RoomParticipant {
+  id           String   @id @default(cuid())
+  roomId       String
+  room         Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  unreadCount  Int      @default(0)
+
+  @@unique([roomId, userId])
+  @@index([userId])
+}
+
+model Message {
+  id             String      @id @default(cuid())
+  roomId         String
+  room           Room        @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  senderId       String
+  sender         User        @relation(fields: [senderId], references: [id])
+  message        String?     @db.Text
+  messageType    MessageType @default(TEXT)
+  attachmentUrls Json? // string[]
+  imageCaption   String?
+  // Snapshot of the product a conversation started from (or was pointed
+  // at later), e.g. { id, title, image, price, currency }. A snapshot
+  // rather than a live relation so the reference still renders sensibly
+  // even if the product is edited or removed afterwards.
+  productSnapshot Json?
+  seenBy         Json? // string[] of userIds
+  deliveredTo    Json? // string[] of userIds
+  isDeleted      Boolean     @default(false)
+  deletedFor     Json? // string[] of userIds
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  @@index([roomId])
+}

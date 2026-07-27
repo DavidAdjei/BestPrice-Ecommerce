@@ -1,0 +1,127 @@
+@import "tailwindcss";
+
+/* Manual class-based dark mode instead of only following OS preference,
+   so the toggle in the nav actually works. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+
+  --color-primary: #f5a022;
+  --color-primary-dark: #d9860f;
+  --color-primary-light: #ffd9a3;
+  --color-primary-tint: #fff4e5;
+  --color-secondary: #14213d;
+  --color-secondary-dark: #0b1526;
+  --color-success: #1e9e5a;
+  --color-success-tint: #e7f8ef;
+  --color-danger: #e5484d;
+  --color-danger-tint: #fdecec;
+
+  /* Surface/text tokens are redefined below per color scheme, but need
+     a @theme entry so Tailwind generates bg-surface / text-ink / etc. */
+  --color-surface: #ffffff;
+  --color-surface-alt: #f7f8fa;
+  --color-surface-sunken: #f1f2f5;
+  --color-ink: #16181d;
+  --color-body: #4b5261;
+  --color-muted: #7a8494;
+  --color-border: #e6e8ec;
+  --color-border-strong: #d3d7de;
+}
+
+.dark {
+  --color-surface: #14161a;
+  --color-surface-alt: #1c1f25;
+  --color-surface-sunken: #23262d;
+  --color-ink: #f2f3f5;
+  --color-body: #c3c8d1;
+  --color-muted: #8b93a3;
+  --color-border: #2b2f38;
+  --color-border-strong: #3a3f4a;
+  --color-primary-tint: rgba(245, 160, 34, 0.12);
+  --color-danger-tint: rgba(229, 72, 77, 0.14);
+  --color-success-tint: rgba(30, 158, 90, 0.14);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  @apply bg-surface text-ink font-sans antialiased;
+}
+
+img {
+  max-width: 100%;
+  display: block;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* Form fields get their own softer focus treatment (see .input below)
+   instead of the hard 2px outline used elsewhere — that outline looked
+   fine on buttons/links but jarring snapping onto text fields with no
+   transition. */
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: none;
+}
+
+@layer components {
+  .skeleton {
+    @apply animate-pulse bg-surface-alt;
+  }
+  .input {
+    @apply w-full rounded-xl border border-border-strong bg-surface px-3.5 py-2.5 text-sm text-ink
+      outline-none transition-all duration-150 placeholder:text-muted
+      focus:border-primary focus:ring-4 focus:ring-primary/15
+      disabled:cursor-not-allowed disabled:opacity-60;
+  }
+  .input-label {
+    @apply mb-1.5 block text-xs font-semibold tracking-wide text-muted uppercase;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg border border-transparent
+      px-5 py-2.5 text-sm font-semibold whitespace-nowrap transition
+      disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply bg-primary text-white hover:bg-primary-dark;
+  }
+  .btn-outline {
+    @apply border-border-strong text-ink hover:border-primary hover:text-primary-dark bg-transparent;
+  }
+  .btn-dark {
+    @apply bg-secondary text-white hover:bg-secondary-dark;
+  }
+  .btn-ghost {
+    @apply text-body hover:bg-surface-alt bg-transparent;
+  }
+  .btn-sm {
+    @apply px-3.5 py-1.5 text-xs;
+  }
+  .btn-block {
+    @apply w-full;
+  }
+  .card-surface {
+    @apply bg-surface border border-border rounded-2xl shadow-sm;
+  }
+  .section-heading {
+    @apply text-2xl md:text-[2.25rem] font-bold text-ink text-center tracking-tight;
+  }
+  .section-subheading {
+    @apply text-base text-muted text-center mt-2;
+  }
+  .empty-state {
+    @apply flex flex-col items-center justify-center text-center gap-3 py-16 px-4 text-muted;
+  }
+  .empty-state h3 {
+    @apply text-ink text-lg;
+  }
+}
