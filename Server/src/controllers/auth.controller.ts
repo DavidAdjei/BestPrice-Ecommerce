@@ -1,6 +1,6 @@
 import type { Request, Response } from "express";
 import { randomBytes } from "node:crypto";
-import { Role } from "@prisma/client";
+import { Role } from "../generated/client.js";
 import { prisma } from "../lib/prisma.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { hashPassword, comparePassword } from "../utils/password.js";

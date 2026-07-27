@@ -1,5 +1,5 @@
 import type { Request, Response } from "express";
-import type { Prisma } from "@prisma/client";
+import type { Prisma } from "../generated/client.js";
 import { prisma } from "../lib/prisma.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { badRequest, notFound } from "../utils/AppError.js";
